@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SZU-CourtPilot · 荔园抢场</title>
+  <link rel="stylesheet" href="/static/style.css?v=9">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark">SZU</div>
+      <div>
+        <h1>荔园抢场</h1>
+        <p>SZU-CourtPilot · 深圳大学体育场馆预约助手</p>
+      </div>
+    </div>
+    <div class="chips">
+      <span id="sessionChip" class="chip muted"><i></i>检测登录中</span>
+      <span id="runnerChip" class="chip muted"><i></i>空闲</span>
+      <span id="clock" class="chip ghost">--:--:--</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card session">
+      <div class="session-main">
+        <div class="section-title">账号会话</div>
+        <div id="sessionText" class="session-text">正在检测已保存的登录状态……</div>
+        <div class="hint">程序不保存账号密码。登录在真实 Chrome 窗口中完成，只保留会话 Cookie。</div>
+      </div>
+      <div class="session-actions">
+        <button id="loginBtn" class="btn primary">打开登录窗口</button>
+        <button id="checkBtn" class="btn ghost">检测登录</button>
+      </div>
+    </section>
+
+    <section id="resultBanner" class="result-banner" hidden>
+      <div>
+        <strong>预约已提交</strong>
+        <span id="resultText"></span>
+      </div>
+      <a class="btn primary" href="https://ehall.szu.edu.cn/qljfwapp/sys/lwSzuCgyy/index.do#/myBooking" target="_blank" rel="noreferrer">去“我的预约”支付</a>
+    </section>
+
+    <div class="layout">
+      <section class="card config">
+        <div class="section-title">预约设置</div>
+
+        <div class="row two">
+          <label class="field">
+            <span>校区</span>
+            <select id="campus"></select>
+          </label>
+          <label class="field">
+            <span>运动项目</span>
+            <select id="sport"></select>
+          </label>
+        </div>
+
+        <div class="row two">
+          <label class="field">
+            <span>预约日期</span>
+            <select id="dateMode">
+              <option value="tomorrow">明天（定时抢场推荐）</option>
+              <option value="today">今天</option>
+              <option value="custom">指定日期</option>
+            </select>
+          </label>
+          <label class="field" id="customDateWrap" hidden>
+            <span>指定日期</span>
+            <input id="targetDate" type="date">
+          </label>
+        </div>
+
+        <div class="picker-block">
+          <div class="picker-head">
+            <div>
+              <div class="picker-title">时间段优先级</div>
+              <div class="picker-help">按顺序尝试；点下面的时间段即可添加或移除</div>
+            </div>
+            <div class="picker-actions"><button id="clearSlots" class="link" type="button">清空</button><button id="refreshSlots" class="link" type="button">刷新状态</button></div>
+          </div>
+          <div id="selectedSlots" class="priority-list empty">尚未选择时间段</div>
+          <div id="slotGrid" class="chip-grid">
+            <div class="chip-loading">正在读取时间段……</div>
+          </div>
+          <div id="slotHint" class="picker-hint"></div>
+        </div>
+
+        <label class="field">
+          <span>场馆 <em>可填多个</em></span>
+          <input id="venues" type="text" list="venueList" placeholder="运动广场东馆羽毛球场">
+          <datalist id="venueList"></datalist>
+          <small>名称需与页面一致；留空表示该项目下全部场馆。多个用逗号分隔。</small>
+        </label>
+
+        <div class="picker-block">
+          <div class="picker-head">
+            <div>
+              <div class="picker-title">场地偏好</div>
+              <div class="picker-help">可多选；不选表示任意空场，选中后按顺序优先</div>
+            </div>
+            <div class="picker-actions"><button id="clearCourts" class="link" type="button">清空</button><button id="refreshCourts" class="link" type="button">刷新场地</button></div>
+          </div>
+          <div id="selectedCourts" class="priority-list empty">不限场地</div>
+          <div id="courtGrid" class="chip-grid">
+            <div class="chip-loading">选择时间段后显示场地</div>
+          </div>
+          <div id="courtHint" class="picker-hint"></div>
+          <label class="check-line compact">
+            <input id="strictCourts" type="checkbox">
+            <span>严格模式：只约选中的场地，指定场地没有空位就放弃</span>
+          </label>
+        </div>
+
+        <div class="divider"></div>
+        <div class="section-subtitle">定时抢场</div>
+
+        <div class="row three">
+          <label class="field">
+            <span>每天开始时间</span>
+            <input id="scheduleTime" type="time" step="1" value="12:30:00">
+          </label>
+          <label class="field">
+            <span>提前准备（秒）</span>
+            <input id="advance" type="number" min="0" max="600" value="60">
+          </label>
+          <label class="field">
+            <span>抢场时限（秒）</span>
+            <input id="maxSeconds" type="number" min="5" max="600" value="90">
+          </label>
+        </div>
+
+        <label class="field">
+          <span>通知 Webhook <em>可选</em></span>
+          <input id="webhook" type="url" placeholder="Server酱 / Bark / 企业微信机器人 URL">
+          <small>预约成功或失败时发送通知；留空则只记录日志并提示音。</small>
+        </label>
+
+        <label class="check-line">
+          <input id="dryRun" type="checkbox">
+          <span>演练模式：只查询空场，不提交预约（“立即尝试”时生效）</span>
+        </label>
+
+        <div class="actions">
+          <button id="saveBtn" class="btn ghost">保存配置</button>
+          <button id="onceBtn" class="btn secondary">立即尝试</button>
+          <button id="scheduleBtn" class="btn primary">开始定时</button>
+          <button id="stopBtn" class="btn danger" disabled>停止</button>
+        </div>
+        <div id="formMessage" class="form-message"></div>
+      </section>
+
+      <section class="card logs">
+        <div class="log-head">
+          <div class="section-title">运行日志</div>
+          <button id="clearLog" class="link">清空显示</button>
+        </div>
+        <pre id="log" class="log">等待操作……</pre>
+        <div class="log-foot">
+          <span id="nextRun">下次执行：--</span>
+          <span class="dot">·</span>
+          <span>请遵守学校场馆预约规则</span>
+        </div>
+      </section>
+    </div>
+
+    <section class="notice">
+      <strong>使用须知</strong>
+      <p>本工具仅用于个人正常预约，请勿用于代抢、倒卖或绕过学校规则。预约提交成功后请在 45 分钟内完成支付，否则订单可能自动取消。程序默认只提交预约，不代付。
+        <a class="inline-link" href="https://ehall.szu.edu.cn/qljfwapp/sys/lwSzuCgyy/index.do#/myBooking" target="_blank" rel="noreferrer">前往“我的预约”支付 →</a>
+      </p>
+    </section>
+  </main>
+
+  <script src="/static/app.js?v=9"></script>
+</body>
+</html>
