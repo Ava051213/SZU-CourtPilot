@@ -1,141 +1,22 @@
-# SZU-CourtPilot（荔园抢场）
+# SZU-CourtPilot
 
-SZU-CourtPilot 是深圳大学体育场馆（`ehall.szu.edu.cn`）的个人预约辅助工具：使用真实 Chrome 完成一次统一身份认证，之后通过场馆系统自身的接口完成查询和提交；不保存账号密码，不代付。
+A personal automation toolkit built with Python and FastAPI.
 
-GitHub 仓库：<https://github.com/Ava051213/SZU-CourtPilot>
-
-> 仅用于个人正常预约。请遵守深圳大学场馆预约规则，不要用于代抢、倒卖或绕过限制。
-
-## 功能
-
-- 支持粤海 / 丽湖校区、各运动项目、包场预约
-- 按“时间段优先级 + 场馆优先级 + 场地偏好”尝试
-- 每天定时抢场（默认 `12:30:00` 开放次日场地），提前预热，到点高频重试
-- 立即尝试当前已开放的场地，或使用“演练模式”只查询空场、不提交
-- 预约成功 / 失败 / 结果未知时记录日志、提示音，可配置 Webhook 通知
-- 预约提交成功后，控制台顶部会出现“去支付”提示
-- 自动跳过今天已经结束的时间段，避免为过期场次空等
-- 本地网页控制台，无需命令行操作
-- 不接触支付密码，提交成功后由本人前往“我的预约”支付
-
-## 快速开始
-
-1. 安装 Python 3.10+（Windows 安装时勾选 “Add Python to PATH”）。
-2. 在本目录打开 PowerShell，安装依赖：
-
-   ```powershell
-   python -m pip install -r requirements.txt
-   ```
-
-3. 双击 `启动.bat`，或在命令行运行：
-
-   ```powershell
-   python run.py
-   ```
-
-4. 浏览器会自动打开 `http://127.0.0.1:8765`。
-5. 点击 **打开登录窗口**，在弹出的 Chrome 中完成深大统一身份认证（扫码/密码均可），登录成功后窗口自动关闭。
-6. 选择校区、项目、日期、时间段、场馆，点击 **保存配置**。
-7. 要抢次日场地：在 `12:30` 前点击 **开始定时**，保持电脑开机、联网、程序运行。
-8. 要尝试当前已开放的场地：点击 **立即尝试**。
-9. 想先确认“能不能查到空场”而不实际下单：勾选 **演练模式** 后再点 **立即尝试**。
-
-程序默认目标是“明天 · 粤海校区 · 羽毛球 · 19:00-20:00 / 20:00-21:00 / 18:00-19:00 · 运动广场东馆羽毛球场”。请在网页中按需修改。默认按每天 `12:30` 开放次日场地设置；如学校调整开放时间，请在“每天开始时间”中修改。
-
-## 配置说明
-
-| 字段 | 说明 |
-| --- | --- |
-| 校区 | `粤海校区` / `丽湖校区` |
-| 运动项目 | 与预约页名称一致，如 `羽毛球`、`网球`、`游泳` |
-| 预约日期 | `明天`（定时抢场推荐）、`今天`、`指定日期` |
-| 时间段优先级 | 点选下方的时间段即可添加；用 ↑/↓ 调整顺序，× 移除；可一键清空 |
-| 场馆 | 逗号分隔；留空表示该项目全部场馆；名称需与页面一致 |
-| 场地偏好 | 从实时场地列表中点选，可多选并排序；不选表示任意空场 |
-| 严格场地模式 | 开启后只约选中的场地；指定场地没有空场就放弃，不会退而求其次 |
-| 每天开始时间 | 默认 `12:30:00`，按本机时间（建议系统时区为北京时间） |
-| 提前准备 | 提前多少秒完成登录、配置和场馆列表预热 |
-| 抢场时限 | 到点后持续尝试多少秒 |
-| 通知 Webhook | 可选。支持 Server酱、Bark 和通用 JSON Webhook |
-
-配置文件保存在 `data/config.json`，也可以在网页中修改。
-
-## 工作原理
-
-1. `szu_booking/login.py` 用 Chrome DevTools Protocol 打开真实 Chrome，等待用户完成 CAS 登录，导出会话 Cookie 到 `data/cookies.json`。
-2. `szu_booking/api.py` 复用 Cookie 调用场馆系统接口：
-   - `getSportVenueData.do`：校区、项目、场馆
-   - `getRqList.do`：可选日期
-   - `getTimeList.do`：时间段及状态
-   - `getOpeningRoom.do`：具体场地及空位
-   - `insertVenueBookingInfo.do`：提交预约
-3. `szu_booking/runner.py` 在 `12:30` 前预热；到点后按优先级查询、选择场地并提交。提交只做一次，遇到超时会停止并提示“结果未知”，避免重复下单。
-4. `szu_booking/web.py` 提供本地网页控制台和日志。
-
-## 命令行（可选）
+## Run
 
 ```powershell
-python -m szu_booking.cli login      # 打开登录窗口
-python -m szu_booking.cli check      # 检查登录
-python -m szu_booking.cli doctor     # 检查配置、场馆、日期、服务器时间
-python -m szu_booking.cli once       # 立即尝试
-python -m szu_booking.cli once --dry-run  # 只查询空场，不提交
-python -m szu_booking.cli schedule   # 按配置定时运行
+python -m pip install -r requirements.txt
+python run.py
 ```
 
-## 测试
+The local dashboard opens in your browser. Runtime data is stored under `data/` and is excluded from Git.
+
+## Development
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-测试只覆盖配置、接口解析和选择逻辑，不会提交真实预约。
+## Notice
 
-## 安全与隐私
-
-- 程序不读取、不保存账号密码。
-- `data/cookies.json` 和 `data/chrome-profile/` 含有登录会话，等同于账号凭据，请勿分享或提交到代码仓库。
-- 本项目默认不自动支付，也不会询问支付密码。
-- 登录失效时，网页会显示“未登录”，重新点击 **打开登录窗口** 即可。
-- 浏览器登录窗口使用系统安装的 Chrome；若未安装，会尝试 Edge。
-
-## 常见问题
-
-**Q：到 12:30 页面还是“已满员”？**
-A：先确认目标日期是“明天”，并提前几分钟启动定时任务。12:30 开放瞬间并发很高，程序会在时限内持续重试；也可以增加多个备选时间段/场馆。
-
-**Q：提示“该预约日期未开放预约”？**
-A：次日场地通常在当天 12:30 才开放；请使用“开始定时”，不要在 12:30 前用“立即尝试”。
-
-**Q：提交成功但没付款？**
-A：程序不代付。请在 45 分钟内到“我的预约”完成支付，否则订单可能自动取消。
-
-**Q：双击 `启动.bat` 出现乱码或“不是内部或外部命令”？**
-A：旧版启动脚本的编码可能被编辑器改坏。本目录中的 `启动.bat` 已改为纯 ASCII + CRLF，可直接双击。若仍失败，请在该目录空白处按住 Shift 右键 →“在此处打开 PowerShell 窗口”，运行 `python run.py`。
-
-**Q：登录很快过期？**
-A：统一身份认证的会话有时效。建议在抢场前重新登录一次；勾选“7天免登录”可延长浏览器会话。程序保存的 Cookie 也会尽量延长有效期，但服务端仍可能提前失效。
-
-**Q：会不会重复预约/多占场地？**
-A：提交超时时程序会停止并提示“结果未知”，不会盲目重试；同一时间段同一场地失败后也不会重复提交。请以“我的预约”为准。
-
-## 目录结构
-
-```
-SZU-CourtPilot/
-├─ run.py                  # 启动本地网页
-├─ 启动.bat                # Windows 双击启动
-├─ requirements.txt
-├─ szu_booking/
-│  ├─ api.py               # 场馆系统接口客户端
-│  ├─ cdp.py               # 轻量 Chrome DevTools 客户端
-│  ├─ login.py             # 手动登录并保存 Cookie
-│  ├─ runner.py            # 定时/立即抢场逻辑
-│  ├─ config.py            # 配置模型
-│  ├─ notify.py            # 通知
-│  ├─ web.py               # FastAPI 控制台
-│  └─ cli.py               # 命令行入口
-├─ web/                    # 控制台前端
-├─ tests/                  # 单元测试
-└─ data/                   # 运行时配置、Cookie、日志（勿分享）
-```
+This repository is shared for code and architecture reference. Use it only for personal, authorized tasks and follow the terms of any service you access.
