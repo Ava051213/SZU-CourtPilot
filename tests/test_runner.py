@@ -1,7 +1,9 @@
+import threading
 import time
 import unittest
+from unittest.mock import patch
 
-from szu_booking.api import Identity, Target
+from szu_booking.api import DateNotOpen, Identity, Target
 from szu_booking.config import Config
 from szu_booking.runner import Prepared, Runner
 
@@ -143,6 +145,116 @@ class RunnerTests(unittest.TestCase):
         result = self.runner._attempt(prepared, config, time.time() + 1)
         self.assertTrue(result["dry_run"])
         self.assertEqual(client.submitted, [])
+
+    def test_slot_priority_falls_through_to_next_slot(self):
+        times = [
+            {"CODE": "19:00-20:00", "disabled": True, "text": "已满员"},
+            {"CODE": "20:00-21:00", "disabled": False, "text": "可预约"},
+        ]
+        rooms = [{"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False}]
+        client = FakeClient(times, rooms)
+        config = Config(
+            time_slots=["19:00-20:00", "20:00-21:00"],
+            retry=type("R", (), {"interval_ms": 50, "max_seconds": 2})(),
+        )
+        prepared = make_prepared(client, ["19:00-20:00", "20:00-21:00"])
+        result = self.runner._attempt(prepared, config, time.time() + 1)
+        self.assertTrue(result["success"])
+        self.assertEqual(result["slot"], "20:00-21:00")
+        self.assertEqual(client.submitted[0]["slot"], "20:00-21:00")
+
+    def test_duplicate_booking_stops_immediately(self):
+        times = [{"CODE": "19:00-20:00", "disabled": False, "text": "可预约"}]
+        rooms = [
+            {"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False},
+            {"WID": "2", "CDMC": "羽毛球A3", "CGBM": "001", "disabled": False},
+        ]
+        client = FakeClient(
+            times, rooms, responses=[{"code": "1", "msg": "该场地您已预约，请勿重复预约"}]
+        )
+        config = Config(retry=type("R", (), {"interval_ms": 50, "max_seconds": 2})())
+        prepared = make_prepared(client)
+        result = self.runner._attempt(prepared, config, time.time() + 1)
+        self.assertFalse(result["success"])
+        self.assertTrue(result["duplicate"])
+        self.assertEqual(len(client.submitted), 1)
+
+    def test_submit_exception_is_reported_as_uncertain(self):
+        times = [{"CODE": "19:00-20:00", "disabled": False, "text": "可预约"}]
+        rooms = [{"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False}]
+        client = FakeClient(times, rooms)
+
+        def boom(**kwargs):
+            raise TimeoutError("read timed out")
+
+        client.submit = boom
+        config = Config(retry=type("R", (), {"interval_ms": 50, "max_seconds": 2})())
+        prepared = make_prepared(client)
+        result = self.runner._attempt(prepared, config, time.time() + 1)
+        self.assertFalse(result["success"])
+        self.assertTrue(result["uncertain"])
+
+    def test_date_not_open_is_retried_until_deadline(self):
+        client = FakeClient([], [])
+
+        def not_open(*args, **kwargs):
+            raise DateNotOpen("该日期暂未开放")
+
+        client.times = not_open
+        config = Config(retry=type("R", (), {"interval_ms": 50, "max_seconds": 1})())
+        prepared = make_prepared(client)
+        result = self.runner._attempt(prepared, config, time.time() + 0.3)
+        self.assertFalse(result["success"])
+        self.assertIn("暂未开放", result["message"])
+        self.assertEqual(client.submitted, [])
+
+    def test_start_rejects_invalid_config(self):
+        with self.assertRaises(ValueError):
+            self.runner.start_once(Config(time_slots=[]))
+
+    def test_start_rejects_when_already_running(self):
+        gate = threading.Event()
+        self.runner._thread = threading.Thread(target=gate.wait, daemon=True)
+        self.runner._thread.start()
+        try:
+            with self.assertRaises(RuntimeError):
+                self.runner.start_once(Config())
+        finally:
+            gate.set()
+            self.runner.join(2)
+
+
+class NotificationTests(unittest.TestCase):
+    def setUp(self):
+        self.runner = Runner(lambda _: None)
+
+    @patch("szu_booking.runner.notify")
+    def test_success_triggers_notification(self, fake_notify):
+        self.runner._finish({"success": True, "message": "预约已提交"})
+        fake_notify.assert_called_once()
+        self.assertEqual(self.runner.phase, "done")
+
+    @patch("szu_booking.runner.notify")
+    def test_dry_run_stays_silent(self, fake_notify):
+        self.runner._finish({"success": True, "dry_run": True, "message": "演练"})
+        fake_notify.assert_not_called()
+
+    @patch("szu_booking.runner.notify")
+    def test_uncertain_result_notifies_and_marks_failed(self, fake_notify):
+        self.runner._finish({"success": False, "uncertain": True, "message": "结果未知"})
+        fake_notify.assert_called_once()
+        self.assertEqual(self.runner.phase, "failed")
+
+    @patch("szu_booking.runner.notify")
+    def test_plain_failure_only_logs(self, fake_notify):
+        self.runner._finish({"success": False, "message": "未抢到场地"})
+        fake_notify.assert_not_called()
+
+    @patch("szu_booking.runner.notify")
+    def test_fail_sets_error_phase(self, fake_notify):
+        self.runner._fail(RuntimeError("boom"))
+        self.assertEqual(self.runner.phase, "error")
+        self.assertFalse(self.runner.last_result["success"])
 
 
 if __name__ == "__main__":
