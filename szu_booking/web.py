@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .api import AuthRequired, SzuClient
+from .api import ApiError, AuthRequired, SzuClient
 from .config import APP_DIR, CONFIG_PATH, Config, resolve_target_date
 from .login import interactive_login, session_status
 from .runner import Runner
@@ -256,10 +256,13 @@ def slots(campus: str, sport: str, date_mode: str = "tomorrow", target_date: str
             "open": date in dates,
             "slots": result,
         }
-    except AuthRequired as exc:
-        raise HTTPException(status_code=401, detail=str(exc))
     except HTTPException:
         raise
+    except AuthRequired as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except ApiError as exc:
+        # DateNotOpen is a subclass: "not open yet" is a state, not a failure.
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"读取时间段失败：{exc}")
 
@@ -293,6 +296,9 @@ def courts(campus: str, sport: str, date: str, slot: str) -> dict[str, Any]:
         return {"date": date, "slot": slot, "courts": list(merged.values())}
     except AuthRequired as exc:
         raise HTTPException(status_code=401, detail=str(exc))
+    except ApiError as exc:
+        # DateNotOpen is a subclass: "not open yet" is a state, not a failure.
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"读取场地失败：{exc}")
 

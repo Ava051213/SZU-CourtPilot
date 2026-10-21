@@ -35,6 +35,15 @@ class ApiError(RuntimeError):
     """Raised for a business/API error returned by the server."""
 
 
+class DateNotOpen(ApiError):
+    """The server says this date is not open for booking yet.
+
+    This is a normal waiting state around 12:30 — the two endpoints release
+    the next day a few hundred milliseconds apart — so callers should treat
+    it as "retry quietly" rather than as a failure.
+    """
+
+
 @dataclass
 class Identity:
     user_id: str
@@ -189,7 +198,10 @@ class SzuClient:
             },
         )
         if not isinstance(data, list):
-            raise ApiError(str(data.get("msg") if isinstance(data, dict) else "时间段数据异常"))
+            message = str(data.get("msg") if isinstance(data, dict) else "时间段数据异常")
+            if "暂未开放" in message:
+                raise DateNotOpen(message)
+            raise ApiError(message)
         return data
 
     def rooms(
@@ -214,6 +226,16 @@ class SzuClient:
         if venue_code and venue_code != "all":
             params["CGBM"] = venue_code
         data = self._json("POST", "modules/sportVenue/getOpeningRoom.do", params)
+        # A not-yet-open date comes back as HTTP 200 with a business code and
+        # no "datas" node.  Surface the server's message instead of dumping the
+        # whole payload through the KeyError branch below.
+        if isinstance(data, dict):
+            code = data.get("code")
+            if code not in (None, 0, "0"):
+                message = str(data.get("msg") or f"场地读取失败（code={code}）")
+                if "暂未开放" in message:
+                    raise DateNotOpen(message)
+                raise ApiError(message)
         try:
             rows = data["datas"]["getOpeningRoom"]["rows"]
         except (KeyError, TypeError) as exc:

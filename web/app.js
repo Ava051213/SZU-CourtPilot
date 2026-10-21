@@ -69,7 +69,9 @@ async function api(path, opts = {}) {
   if (!response.ok) {
     let detail = data && (data.detail || data.message);
     if (Array.isArray(detail)) detail = detail.map((x) => x.msg || x).join("；");
-    throw new Error(detail || `请求失败（HTTP ${response.status}）`);
+    const error = new Error(detail || `请求失败（HTTP ${response.status}）`);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
@@ -432,7 +434,8 @@ async function loadSlots(force = false, silent = false) {
     slotStatus = new Map();
     if (!silent) {
       $("slotHint").className = "picker-hint error";
-      $("slotHint").textContent = `实时状态读取失败：${err.message}`;
+      $("slotHint").textContent =
+        err.status === 401 ? "登录已失效，请重新登录" : `实时状态读取失败：${err.message}`;
     }
   }
   renderSelectedSlots();
@@ -473,7 +476,10 @@ async function loadCourts(silent = false) {
   } catch (err) {
     if (request !== courtsRequest) return;
     allCourts = [];
-    if (!silent) $("courtHint").textContent = `场地列表读取失败：${err.message}`;
+    if (!silent) {
+      $("courtHint").textContent =
+        err.status === 409 ? `${slotDate} 暂未开放预约，可先选好场地等待开放` : `场地列表读取失败：${err.message}`;
+    }
   }
   renderSelectedCourts();
   renderCourtGrid();

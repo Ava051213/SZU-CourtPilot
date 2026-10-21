@@ -8,3 +8,5 @@ venv/
 *.log
 
 README.local.md
+
+.workbuddy/

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date as date_cls, datetime, timedelta
 from typing import Any, Callable
 
-from .api import ApiError, AuthRequired, Identity, SzuClient, Target, room_label
+from .api import ApiError, AuthRequired, DateNotOpen, Identity, SzuClient, Target, room_label
 from .config import Config, COOKIE_PATH, resolve_target_date
 from .notify import notify
 
@@ -233,6 +233,7 @@ class Runner:
         venue_order = {str(v.get("CGBM")): i for i, v in enumerate(prepared.venues)}
         announced: set[str] = set()
         tried: set[tuple[str, str]] = set()
+        reported: set[str] = set()
 
         while time.time() < deadline and not self._stop.is_set():
             attempts += 1
@@ -246,6 +247,14 @@ class Runner:
                 )
             except AuthRequired:
                 raise
+            except DateNotOpen as exc:
+                last_message = str(exc)
+                self.phase = "等待开放"
+                if last_message not in reported:
+                    reported.add(last_message)
+                    self.log(f"时间段尚未开放：{last_message}")
+                time.sleep(interval)
+                continue
             except Exception as exc:
                 last_message = f"查询时间段失败：{exc}"
                 self.log(last_message)
@@ -278,9 +287,18 @@ class Runner:
                     )
                 except AuthRequired:
                     raise
+                except DateNotOpen as exc:
+                    last_message = f"{slot} 尚未开放（{exc}）"
+                    self.phase = f"等待 {slot} 开放"
+                    if last_message not in reported:
+                        reported.add(last_message)
+                        self.log(last_message)
+                    continue
                 except Exception as exc:
                     last_message = f"查询场地失败：{exc}"
-                    self.log(last_message)
+                    if last_message not in reported:
+                        reported.add(last_message)
+                        self.log(last_message)
                     continue
 
                 available = [
