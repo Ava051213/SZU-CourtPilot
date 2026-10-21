@@ -13,7 +13,6 @@ let currentConfig = null;
 let options = FALLBACK;
 let lastLogSeq = 0;
 let serverSeq = 0;
-let logCleared = false;
 let busy = false;
 let runnerActive = false;
 
@@ -670,10 +669,6 @@ async function pollStatus() {
 function appendLogs(items) {
   if (!items || !items.length) return;
   const box = $("log");
-  if (logCleared && lastLogSeq === 0) {
-    box.textContent = "";
-    logCleared = false;
-  }
   if (box.textContent === "等待操作……") box.textContent = "";
   const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   for (const item of items) {
@@ -703,10 +698,15 @@ async function pollLogs() {
   } catch (_) { /* transient */ }
 }
 
-function clearLogs() {
-  $("log").textContent = "";
-  lastLogSeq = serverSeq;
-  logCleared = true;
+async function clearLogs() {
+  try {
+    const data = await api("/api/logs/clear", { method: "POST" });
+    $("log").textContent = "";
+    lastLogSeq = data.seq || serverSeq;
+    serverSeq = lastLogSeq;
+  } catch (err) {
+    setMessage(`清空日志失败：${err.message}`, "error");
+  }
 }
 
 function bind() {

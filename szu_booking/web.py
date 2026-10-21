@@ -391,6 +391,19 @@ def logs(after: int = 0) -> dict[str, Any]:
     return {"logs": items, "seq": seq}
 
 
+@app.post("/api/logs/clear")
+def clear_logs() -> dict[str, Any]:
+    """Drop the in-memory log buffer.
+
+    Clearing only the browser view is not enough: a refresh resets the cursor
+    to 0 and the whole buffer comes back.  ``data/app.log`` keeps the history.
+    """
+    with state.lock:
+        state.logs.clear()
+        seq = state.seq
+    return {"ok": True, "seq": seq}
+
+
 @app.get("/api/screenshot")
 def screenshot() -> FileResponse:
     path = APP_DIR / "data" / "login.png"
