@@ -21,7 +21,7 @@ from .runner import Runner
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
-app = FastAPI(title="SZU-CourtPilot · 荔园抢场")
+app = FastAPI(title="SZU-CourtPilot")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 

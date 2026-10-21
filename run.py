@@ -23,7 +23,7 @@ def _free_port(start: int = 8765) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SZU-CourtPilot · 荔园抢场")
+    parser = argparse.ArgumentParser(description="SZU-CourtPilot")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
@@ -38,7 +38,7 @@ def main() -> None:
 
         threading.Thread(target=open_later, daemon=True).start()
 
-    print(f"\n  SZU-CourtPilot · 荔园抢场  ->  {url}\n  按 Ctrl+C 退出\n")
+    print(f"\n  SZU-CourtPilot  ->  {url}\n  按 Ctrl+C 退出\n")
     uvicorn.run("szu_booking.web:app", host=args.host, port=port, log_level="warning")
 
 

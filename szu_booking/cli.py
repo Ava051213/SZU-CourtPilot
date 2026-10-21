@@ -79,7 +79,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="szu-courtpilot", description="SZU-CourtPilot · 荔园抢场")
+    parser = argparse.ArgumentParser(prog="szu-courtpilot", description="SZU-CourtPilot")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("login", help="打开 Chrome 登录并保存会话").set_defaults(func=cmd_login)
     sub.add_parser("check", help="检查登录状态").set_defaults(func=cmd_check)
