@@ -23,6 +23,20 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(any("严格场地" in e for e in config.validate()))
         self.assertFalse(Config(strict_courts=True, courts=["A2"]).validate())
 
+    def test_needed_count_must_not_exceed_slots(self):
+        config = Config(time_slots=["19:00-20:00"], needed_count=2)
+        self.assertTrue(any("不能超过" in e for e in config.validate()))
+        self.assertFalse(Config(time_slots=["19:00-20:00"], needed_count=1).validate())
+
+    def test_needed_count_must_be_positive(self):
+        self.assertTrue(any("至少为 1" in e for e in Config(needed_count=0).validate()))
+
+    def test_needed_count_parsing(self):
+        self.assertEqual(Config().needed_count, 1)
+        self.assertEqual(Config.from_dict({"needed_count": "2"}).needed_count, 2)
+        self.assertEqual(Config.from_dict({"needed_count": "abc"}).needed_count, 1)
+        self.assertEqual(Config.from_dict({"needed_count": None}).needed_count, 1)
+
     def test_save_load_roundtrip(self):
         path = Path("data") / "test-config-roundtrip.json"
         try:

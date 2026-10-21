@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from szu_booking.api import DateNotOpen, Identity, Target
 from szu_booking.config import Config
-from szu_booking.runner import Prepared, Runner
+from szu_booking.runner import Prepared, Runner, _looks_like_quota
 
 
 class FakeClient:
@@ -212,6 +212,93 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.runner.start_once(Config(time_slots=[]))
 
+    def test_multiple_slots_collects_requested_count(self):
+        times = [
+            {"CODE": "19:00-20:00", "disabled": False, "text": "可预约"},
+            {"CODE": "20:00-21:00", "disabled": False, "text": "可预约"},
+        ]
+        rooms = [{"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False}]
+        client = FakeClient(times, rooms)
+        config = Config(needed_count=2, retry=type("R", (), {"interval_ms": 50, "max_seconds": 2})())
+        prepared = make_prepared(client, ["19:00-20:00", "20:00-21:00"])
+        result = self.runner._attempt(prepared, config, time.time() + 2)
+        self.assertTrue(result["success"])
+        self.assertFalse(result["partial"])
+        self.assertEqual(
+            [b["slot"] for b in result["bookings"]], ["19:00-20:00", "20:00-21:00"]
+        )
+        self.assertEqual(len(client.submitted), 2)
+
+    def test_needed_count_one_stops_after_first_booking(self):
+        times = [
+            {"CODE": "19:00-20:00", "disabled": False, "text": "可预约"},
+            {"CODE": "20:00-21:00", "disabled": False, "text": "可预约"},
+        ]
+        rooms = [{"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False}]
+        client = FakeClient(times, rooms)
+        config = Config(needed_count=1, retry=type("R", (), {"interval_ms": 50, "max_seconds": 2})())
+        prepared = make_prepared(client, ["19:00-20:00", "20:00-21:00"])
+        result = self.runner._attempt(prepared, config, time.time() + 1)
+        self.assertTrue(result["success"])
+        self.assertEqual(len(client.submitted), 1)
+        self.assertEqual(result["slot"], "19:00-20:00")
+
+    def test_partial_result_when_one_slot_stays_full(self):
+        times = [
+            {"CODE": "19:00-20:00", "disabled": True, "text": "已满员"},
+            {"CODE": "20:00-21:00", "disabled": False, "text": "可预约"},
+        ]
+        rooms = [{"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False}]
+        client = FakeClient(times, rooms)
+        config = Config(needed_count=2, retry=type("R", (), {"interval_ms": 50, "max_seconds": 1})())
+        prepared = make_prepared(client, ["19:00-20:00", "20:00-21:00"])
+        result = self.runner._attempt(prepared, config, time.time() + 0.3)
+        self.assertFalse(result["success"])
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["missed"], ["19:00-20:00"])
+        self.assertEqual(len(result["bookings"]), 1)
+
+    def test_quota_error_halts_the_whole_run(self):
+        times = [
+            {"CODE": "19:00-20:00", "disabled": False, "text": "可预约"},
+            {"CODE": "20:00-21:00", "disabled": False, "text": "可预约"},
+        ]
+        rooms = [{"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False}]
+        client = FakeClient(
+            times, rooms, responses=[{"code": "1", "msg": "超出当天预约次数上限"}]
+        )
+        config = Config(needed_count=2, retry=type("R", (), {"interval_ms": 50, "max_seconds": 1})())
+        prepared = make_prepared(client, ["19:00-20:00", "20:00-21:00"])
+        result = self.runner._attempt(prepared, config, time.time() + 1)
+        self.assertFalse(result["success"])
+        self.assertIn("次数", result["exhausted"])
+        self.assertEqual(len(client.submitted), 1)
+
+    def test_slots_rotate_instead_of_starving_the_second(self):
+        times = [
+            {"CODE": "19:00-20:00", "disabled": False, "text": "可预约"},
+            {"CODE": "20:00-21:00", "disabled": False, "text": "可预约"},
+        ]
+        rooms = [
+            {"WID": "1", "CDMC": "羽毛球A2", "CGBM": "001", "disabled": False},
+            {"WID": "2", "CDMC": "羽毛球A3", "CGBM": "001", "disabled": False},
+        ]
+
+        class Routing(FakeClient):
+            def submit(self, **kwargs):
+                self.submitted.append(kwargs)
+                if kwargs["slot"] == "19:00-20:00":
+                    return {"code": "1", "msg": "该场地已被预约"}
+                return {"code": "0", "msg": "预约成功"}
+
+        client = Routing(times, rooms)
+        config = Config(needed_count=2, retry=type("R", (), {"interval_ms": 50, "max_seconds": 1})())
+        prepared = make_prepared(client, ["19:00-20:00", "20:00-21:00"])
+        result = self.runner._attempt(prepared, config, time.time() + 0.4)
+        self.assertEqual(client.submitted[0]["slot"], "19:00-20:00")
+        self.assertEqual(client.submitted[1]["slot"], "20:00-21:00")
+        self.assertTrue(result["partial"])
+
     def test_start_rejects_when_already_running(self):
         gate = threading.Event()
         self.runner._thread = threading.Thread(target=gate.wait, daemon=True)
@@ -251,10 +338,27 @@ class NotificationTests(unittest.TestCase):
         fake_notify.assert_not_called()
 
     @patch("szu_booking.runner.notify")
+    def test_partial_result_notifies_and_marks_phase(self, fake_notify):
+        self.runner._finish({"success": False, "partial": True, "message": "部分成功"})
+        fake_notify.assert_called_once()
+        self.assertEqual(self.runner.phase, "partial")
+
+    @patch("szu_booking.runner.notify")
     def test_fail_sets_error_phase(self, fake_notify):
         self.runner._fail(RuntimeError("boom"))
         self.assertEqual(self.runner.phase, "error")
         self.assertFalse(self.runner.last_result["success"])
+
+
+class QuotaDetectionTests(unittest.TestCase):
+    def test_quota_wording_is_detected(self):
+        self.assertTrue(_looks_like_quota("超出当天预约次数上限"))
+        self.assertTrue(_looks_like_quota("超过每日最多预约次数"))
+
+    def test_ordinary_failures_are_not_quota(self):
+        self.assertFalse(_looks_like_quota("该场地已被预约"))
+        self.assertFalse(_looks_like_quota("19:00-20:00 已满员"))
+        self.assertFalse(_looks_like_quota("该场地您已预约，请勿重复预约"))
 
 
 if __name__ == "__main__":

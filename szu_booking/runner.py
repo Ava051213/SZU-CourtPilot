@@ -24,6 +24,19 @@ class Prepared:
     data: dict[str, Any] = field(default_factory=dict)
 
 
+_QUOTA_HINTS = ("超出", "超过", "上限", "次数", "最多", "限制", "限约")
+
+
+def _looks_like_quota(message: str) -> bool:
+    """Best-effort detection of a per-account booking cap.
+
+    The API reports this only as free text, so the hints lean towards
+    stopping: cutting a run short is recoverable, burning the whole window on
+    a cap that will never lift is not.
+    """
+    return any(hint in message for hint in _QUOTA_HINTS)
+
+
 class Runner:
     def __init__(self, log: Callable[[str], None] = print) -> None:
         self.log = log
@@ -128,7 +141,8 @@ class Runner:
             f"目标：{config.campus} · {config.sport} · {date} · "
             f"场馆 {'、'.join(str(v.get('CGMC')) for v in venues)}"
         )
-        self.log(f"时间段优先级：{' > '.join(slots)}")
+        needed = max(1, min(config.needed_count, len(slots)))
+        self.log(f"时间段优先级：{' > '.join(slots)}（需 {needed} 场）")
         return Prepared(
             client=client,
             identity=identity,
@@ -181,8 +195,10 @@ class Runner:
                 self.log("时间到，开始抢场！")
                 result = self._attempt(prepared, config, deadline)
                 self._finish(result)
-                if result.get("success"):
-                    # One success per day is enough; wait for the next day.
+                if result.get("success") or result.get("partial") or result.get("uncertain"):
+                    # Something is already booked (or its state is unknown), so
+                    # stop here and let the user settle it instead of firing a
+                    # second round inside the same window.
                     self.next_run = None
                     return
             except AuthRequired as exc:
@@ -235,7 +251,16 @@ class Runner:
         tried: set[tuple[str, str]] = set()
         reported: set[str] = set()
 
+        # The list order is the user's own priority ranking: never re-sort it.
+        needed = max(1, min(config.needed_count, len(prepared.slots)))
+        pending: list[str] = list(prepared.slots)
+        bookings: list[dict[str, str]] = []
+        skipped: dict[str, str] = {}
+        halted = ""
+
         while time.time() < deadline and not self._stop.is_set():
+            if len(bookings) >= needed or not pending:
+                break
             attempts += 1
             # One times request per round: 3 slots should not mean 3x the
             # request rate at 12:30.
@@ -262,8 +287,14 @@ class Runner:
                 continue
             by_code = {str(t.get("CODE")): t for t in times}
 
-            for slot in prepared.slots:
-                if self._stop.is_set() or time.time() >= deadline:
+            # Give every unfinished slot its turn each round. Starving the
+            # second slot behind a stuck first one is the only real risk here.
+            more_slots_waiting = len(pending) > 1
+
+            for slot in list(pending):
+                if self._stop.is_set() or time.time() >= deadline or halted:
+                    break
+                if len(bookings) >= needed:
                     break
                 item = by_code.get(slot)
                 if item is None:
@@ -341,15 +372,10 @@ class Runner:
                     if self.dry_run:
                         text = f"演练：找到空场 {prepared.date} {slot} / {label}，未提交"
                         self.log(text)
-                        return {
-                            "success": True,
-                            "dry_run": True,
-                            "message": text,
-                            "slot": slot,
-                            "court": label,
-                            "date": prepared.date,
-                            "attempts": attempts,
-                        }
+                        bookings.append({"slot": slot, "court": label})
+                        pending.remove(slot)
+                        last_message = text
+                        break
                     self.log(f"尝试提交：{slot} / {label}……")
                     try:
                         response = prepared.client.submit(
@@ -363,55 +389,119 @@ class Runner:
                     except Exception as exc:
                         # A timeout after POST is ambiguous: stop rather than
                         # risk creating a second booking.
-                        last_message = f"提交结果未知：{exc}。请到“我的预约”确认"
+                        settled = "、".join(f"{b['slot']} / {b['court']}" for b in bookings)
+                        last_message = f"提交结果未知：{exc}。"
+                        if settled:
+                            last_message += f"已成交 {settled}，另一单请到“我的预约”核对"
+                        else:
+                            last_message += "请到“我的预约”确认"
                         self.log(last_message)
-                        return {
-                            "success": False,
-                            "uncertain": True,
-                            "message": last_message,
-                            "slot": slot,
-                            "court": label,
-                            "attempts": attempts,
-                        }
+                        return self._result(
+                            prepared,
+                            bookings,
+                            needed,
+                            pending,
+                            attempts,
+                            last_message,
+                            uncertain=True,
+                            slot=slot,
+                            court=label,
+                        )
                     code = str(response.get("code"))
                     message = str(response.get("msg") or "")
                     if code == "0":
                         text = f"预约已提交：{prepared.date} {slot} / {label}，请在45分钟内支付"
                         self.log(text)
-                        return {
-                            "success": True,
-                            "message": text,
-                            "slot": slot,
-                            "court": label,
-                            "date": prepared.date,
-                            "attempts": attempts,
-                        }
+                        bookings.append({"slot": slot, "court": label})
+                        pending.remove(slot)
+                        last_message = text
+                        break
                     last_message = message or f"预约失败（code={code}）"
                     tried.add(key)
                     self.log(f"提交失败：{last_message}")
+                    if _looks_like_quota(last_message):
+                        # Account-level cap: no other slot will pass either.
+                        halted = last_message
+                        break
                     if any(k in last_message for k in ("已预约", "重复预约")):
-                        return {
-                            "success": False,
-                            "duplicate": True,
-                            "message": last_message,
-                            "slot": slot,
-                            "court": label,
-                            "attempts": attempts,
-                        }
-
+                        if bookings:
+                            # The server refused a second booking for this user.
+                            halted = last_message
+                            break
+                        skipped[slot] = last_message
+                        pending.remove(slot)
+                        break
+                    if more_slots_waiting:
+                        # Hand the rest of this round to the other slots.
+                        break
+            if halted:
+                break
+            if len(bookings) >= needed or not pending:
+                break
+            if self.dry_run:
+                break
             if self._stop.is_set():
                 break
             time.sleep(interval)
 
+        return self._result(
+            prepared,
+            bookings,
+            needed,
+            pending,
+            attempts,
+            last_message,
+            duplicate=bool(skipped) and not bookings,
+            exhausted=halted,
+        )
+
+    def _result(
+        self,
+        prepared: Prepared,
+        bookings: list[dict[str, str]],
+        needed: int,
+        pending: list[str],
+        attempts: int,
+        message: str,
+        *,
+        uncertain: bool = False,
+        duplicate: bool = False,
+        exhausted: str = "",
+        slot: str = "",
+        court: str = "",
+    ) -> dict[str, Any]:
+        enough = len(bookings) >= needed
+        first = bookings[0] if bookings else {}
+        if not message:
+            message = "到达时限，未抢到场地"
         return {
-            "success": False,
-            "message": last_message or "到达时限，未抢到场地",
+            "success": enough and not uncertain,
+            "partial": bool(bookings) and not enough,
+            "uncertain": uncertain,
+            "duplicate": duplicate,
+            "exhausted": exhausted,
+            "dry_run": self.dry_run,
+            "date": prepared.date,
+            "needed": needed,
+            "bookings": list(bookings),
+            "missed": [] if enough else list(pending),
+            "slot": slot or first.get("slot", ""),
+            "court": court or first.get("court", ""),
             "attempts": attempts,
+            "message": message,
         }
 
     # -------------------------------------------------------------------- final
     def _finish(self, result: dict[str, Any]) -> None:
-        self.phase = "done" if result.get("success") else "failed"
+        if result.get("success"):
+            self.phase = "done"
+        elif result.get("uncertain"):
+            # An unknown submission outranks a partial win: it needs checking.
+            self.phase = "failed"
+        elif result.get("partial"):
+            self.phase = "partial"
+        else:
+            self.phase = "failed"
         self.last_result = result
         if result.get("dry_run"):
             self.log("演练结束：未提交任何预约。")
@@ -420,6 +510,8 @@ class Runner:
             notify("深大场馆预约已提交", result.get("message", ""), self.log)
         elif result.get("uncertain"):
             notify("深大场馆预约结果未知", result.get("message", ""), self.log)
+        elif result.get("partial"):
+            notify("深大场馆预约部分成功", result.get("message", ""), self.log)
         else:
             self.log(f"本次结束：{result.get('message')}")
 

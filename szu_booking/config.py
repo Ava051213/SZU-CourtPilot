@@ -53,6 +53,9 @@ class Config:
     time_slots: list[str] = field(
         default_factory=lambda: ["19:00-20:00", "20:00-21:00", "18:00-19:00"]
     )
+    # How many bookings the run must collect, taken in time_slots order.
+    # 1 means "any one slot is enough"; len(time_slots) means "all of them".
+    needed_count: int = 1
     venues: list[str] = field(default_factory=lambda: ["运动广场东馆羽毛球场"])
     courts: list[str] = field(default_factory=list)
     strict_courts: bool = False
@@ -87,6 +90,7 @@ class Config:
             date_mode=str(data.get("date_mode", base.date_mode)),
             target_date=str(data.get("target_date", base.target_date)),
             time_slots=as_list(data.get("time_slots"), base.time_slots),
+            needed_count=_as_int(data.get("needed_count"), base.needed_count),
             venues=as_list(data.get("venues"), base.venues),
             courts=as_list(data.get("courts"), base.courts),
             strict_courts=bool(data.get("strict_courts", base.strict_courts)),
@@ -110,6 +114,12 @@ class Config:
         for slot in self.time_slots:
             if not _valid_slot(slot):
                 errors.append(f"时间段格式错误：{slot}（应为 HH:MM-HH:MM）")
+        if self.needed_count < 1:
+            errors.append("需要约到的场次数至少为 1")
+        elif self.time_slots and self.needed_count > len(self.time_slots):
+            errors.append(
+                f"需要约到的场次数（{self.needed_count}）不能超过已选时间段数量（{len(self.time_slots)}）"
+            )
         if self.strict_courts and not self.courts:
             errors.append("严格场地模式需要至少选择一个场地偏好")
         if not _valid_clock(self.schedule.time):
@@ -135,6 +145,15 @@ class Config:
         except (OSError, ValueError):
             return cls()
         return cls.from_dict(data)
+
+
+def _as_int(value: Any, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def _valid_clock(value: str) -> bool:

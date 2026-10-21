@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SZU-CourtPilot</title>
-  <link rel="stylesheet" href="/static/style.css?v=9">
+  <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body>
   <header class="topbar">
@@ -77,7 +77,7 @@
           <div class="picker-head">
             <div>
               <div class="picker-title">时间段优先级</div>
-              <div class="picker-help">按顺序尝试；点下面的时间段即可添加或移除</div>
+              <div class="picker-help">按此顺序依次抢；点下面的时间段即可添加或移除</div>
             </div>
             <div class="picker-actions"><button id="clearSlots" class="link" type="button">清空</button><button id="refreshSlots" class="link" type="button">刷新状态</button></div>
           </div>
@@ -87,6 +87,12 @@
           </div>
           <div id="slotHint" class="picker-hint"></div>
         </div>
+
+        <label class="field">
+          <span>需要约到的场次数</span>
+          <input id="neededCount" type="number" min="1" step="1" value="1">
+          <small>1 表示任一时段抢到即止；等于时间段数量则表示全部都要。不能超过已选时间段的数量。每多一单就多一次提交，会占用 12:30 的抢场窗口。</small>
+        </label>
 
         <label class="field">
           <span>场馆 <em>可填多个</em></span>
@@ -174,6 +180,6 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=10"></script>
+  <script src="/static/app.js?v=13"></script>
 </body>
 </html>

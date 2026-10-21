@@ -139,6 +139,7 @@ function fillForm(config) {
   $("customDateWrap").hidden = $("dateMode").value !== "custom";
   selectedSlots = normalizeSlotList(config.time_slots);
   selectedCourts = normalizeSlotList(config.courts);
+  $("neededCount").value = String(config.needed_count || 1);
   $("strictCourts").checked = Boolean(config.strict_courts);
   $("venues").value = (config.venues || []).join(", ");
   $("scheduleTime").value = normalizeTime((config.schedule || {}).time || "12:30:00");
@@ -147,6 +148,7 @@ function fillForm(config) {
   $("webhook").value = (config.notify || {}).webhook_url || "";
   renderSelectedSlots();
   renderSelectedCourts();
+  syncNeededLimit();
   syncVenues();
   loadSlots();
 }
@@ -161,6 +163,7 @@ function readForm() {
     date_mode: $("dateMode").value,
     target_date: $("targetDate").value,
     time_slots: [...selectedSlots],
+    needed_count: Math.max(1, Number($("neededCount").value) || 1),
     venues: splitList($("venues").value),
     courts: [...selectedCourts],
     strict_courts: $("strictCourts").checked,
@@ -298,6 +301,15 @@ function renderSelectedSlots() {
   });
 }
 
+function syncNeededLimit() {
+  const input = $("neededCount");
+  const max = Math.max(1, selectedSlots.length);
+  input.max = String(max);
+  input.disabled = selectedSlots.length === 0;
+  const value = Math.max(1, Math.min(Number(input.value) || 1, max));
+  input.value = String(value);
+}
+
 function renderSlotGrid() {
   const grid = $("slotGrid");
   grid.innerHTML = "";
@@ -406,6 +418,7 @@ function moveSlot(index, delta) {
   if (target < 0 || target >= selectedSlots.length) return;
   [selectedSlots[index], selectedSlots[target]] = [selectedSlots[target], selectedSlots[index]];
   renderSelectedSlots();
+  syncNeededLimit();
   if (index === 0 || target === 0) loadCourts();
 }
 
@@ -422,6 +435,7 @@ function toggleSlot(code) {
   else selectedSlots.push(code);
   renderSelectedSlots();
   renderSlotGrid();
+  syncNeededLimit();
   loadCourts();
 }
 
@@ -523,7 +537,7 @@ async function loadCourts(silent = false) {
       $("courtHint").textContent = `${data.date} 尚未开放，以下为固定场地清单，可按顺序先选好`;
     } else {
       $("courtHint").textContent = allCourts.length
-        ? `${slotDate} ${slot}：共 ${allCourts.length} 个场地，可按顺序选择偏好；暂无空位的场地也可先选`
+        ? `共 ${allCourts.length} 个场地，偏好对所有时间段生效 · 空位数参考 ${slot}`
         : "该时间段暂无场地数据";
     }
   } catch (err) {
@@ -646,11 +660,12 @@ function renderStatus(data) {
 
   const result = data.last_result;
   const banner = $("resultBanner");
-  if (result && result.success && !result.dry_run) {
-    banner.hidden = false;
+  const booked = result && (result.success || result.partial) && !result.dry_run;
+  banner.hidden = !booked;
+  banner.classList.toggle("partial", Boolean(booked && result.partial));
+  if (booked) {
+    banner.querySelector("strong").textContent = result.success ? "预约已提交" : "部分成功";
     $("resultText").textContent = result.message || "请在 45 分钟内完成支付。";
-  } else {
-    banner.hidden = true;
   }
 
   if (data.login && data.login.running) {
@@ -674,8 +689,8 @@ function appendLogs(items) {
   for (const item of items) {
     const line = document.createElement("div");
     const cls = /失败|错误|异常|超时|无效/.test(item.text) ? "err"
-      : /成功|已保存|登录有效|时间到/.test(item.text) ? "ok"
-      : /等待|尚未|暂不/.test(item.text) ? "warn" : "";
+      : /成功|已保存|登录有效|时间到|已提交/.test(item.text) ? "ok"
+      : /等待|尚未|暂不|部分/.test(item.text) ? "warn" : "";
     line.className = cls;
     const time = document.createElement("span");
     time.className = "t";
@@ -733,6 +748,7 @@ function bind() {
     renderSlotGrid();
     renderSelectedCourts();
     renderCourtGrid();
+    syncNeededLimit();
     loadCourts();
   });
   $("clearCourts").addEventListener("click", () => {

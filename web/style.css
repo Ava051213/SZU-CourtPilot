@@ -123,6 +123,11 @@ main { max-width: 1240px; margin: 26px auto 40px; padding: 0 22px; }
 }
 .result-banner strong { margin-right: 8px; }
 .result-banner .btn { flex-shrink: 0; height: 36px; font-size: 12px; }
+.result-banner.partial {
+  background: var(--amber-soft);
+  border-color: #f0dfa8;
+  color: var(--amber);
+}
 
 .section-title { font-size: 16px; font-weight: 700; letter-spacing: 0.2px; }
 .section-subtitle { font-size: 13px; font-weight: 700; color: var(--primary); margin: 2px 0 12px; }
