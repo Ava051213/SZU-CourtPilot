@@ -37,6 +37,41 @@ const FALLBACK_SLOTS = (() => {
   return out;
 })();
 
+// 场地编号是固定的（羽毛球：A1-D8 共 32 片），所以在目标日期还没开放、
+// 接口拿不到场地列表时，仍然可以提前按这份清单选好偏好。
+const COURT_PREFIX = { 羽毛球: "羽毛球场" };
+const COURT_GROUPS = ["A", "B", "C", "D"];
+const COURT_PER_GROUP = 8;
+
+function fixedCourts() {
+  const prefix = COURT_PREFIX[$("sport").value];
+  if (!prefix) return [];
+  const out = [];
+  for (const group of COURT_GROUPS) {
+    for (let i = 1; i <= COURT_PER_GROUP; i += 1) {
+      out.push({ name: `${prefix}${group}${i}`, available: null, total: 0, venues: [] });
+    }
+  }
+  return out;
+}
+
+function mergeCourts(list) {
+  const base = fixedCourts();
+  if (!base.length) return Array.isArray(list) ? list : [];
+  const byName = new Map(base.map((x) => [x.name, x]));
+  for (const item of Array.isArray(list) ? list : []) {
+    const hit = byName.get(item.name);
+    if (hit) {
+      hit.available = item.available;
+      hit.total = item.total || 0;
+      hit.venues = item.venues || [];
+    } else {
+      byName.set(item.name, { ...item, available: item.available ?? null });
+    }
+  }
+  return Array.from(byName.values());
+}
+
 function slotStateText(item) {
   if (!item) return "状态未知";
   if (item.text) return item.text;
@@ -315,7 +350,10 @@ function renderSelectedCourts() {
     const info = allCourts.find((x) => courtMatches(name, x.name));
     const status = document.createElement("span");
     status.className = "priority-status";
-    status.textContent = info ? (info.available > 0 ? `可约 ${info.available}` : "暂无空位") : "状态未知";
+    const unknown = !info || info.available === null || info.available === undefined;
+    status.textContent = unknown
+      ? (info ? "未开放" : "状态未知")
+      : (info.available > 0 ? `可约 ${info.available}` : "暂无空位");
 
     const up = iconButton("↑", "提高优先级", () => moveCourt(index, -1), index === 0);
     const down = iconButton("↓", "降低优先级", () => moveCourt(index, 1), index === selectedCourts.length - 1);
@@ -348,14 +386,17 @@ function renderCourtGrid() {
     btn.type = "button";
     btn.className = "slot-chip";
     if (selectedCourts.some((x) => courtMatches(x, item.name))) btn.classList.add("selected");
-    if (item.available === 0) btn.classList.add("disabled");
+    const unknown = item.available === null || item.available === undefined;
+    if (!unknown && item.available === 0) btn.classList.add("disabled");
     btn.addEventListener("click", () => toggleCourt(item.name));
 
     const name = document.createElement("span");
     name.textContent = item.name;
     const state = document.createElement("span");
     state.className = "state";
-    state.textContent = item.available > 0 ? `可约 ${item.available}/${item.total}` : `暂无空位（${item.total}）`;
+    state.textContent = unknown
+      ? "未开放"
+      : (item.available > 0 ? `可约 ${item.available}/${item.total}` : `暂无空位（${item.total}）`);
     btn.append(name, state);
     grid.appendChild(btn);
   }
@@ -445,7 +486,7 @@ async function loadSlots(force = false, silent = false) {
 
 async function loadCourts(silent = false) {
   const request = ++courtsRequest;
-  if (!selectedSlots.length || !slotDate) {
+  if (!selectedSlots.length) {
     allCourts = [];
     $("courtGrid").innerHTML = '<div class="chip-loading">先选择时间段，再选择偏好场地</div>';
     $("courtHint").textContent = "";
@@ -456,6 +497,15 @@ async function loadCourts(silent = false) {
     const info = slotStatus.get(code);
     return info && !info.disabled;
   }) || selectedSlots[0];
+  if (!slotDate) {
+    allCourts = fixedCourts();
+    $("courtHint").textContent = allCourts.length
+      ? "目标日期未开放，以下为固定场地清单，可按顺序先选好"
+      : "暂时拿不到场地列表；不选则默认任意空场";
+    renderSelectedCourts();
+    renderCourtGrid();
+    return;
+  }
   if (!silent) {
     $("courtGrid").innerHTML = '<div class="chip-loading">正在读取场地……</div>';
     $("courtHint").textContent = "";
@@ -469,16 +519,22 @@ async function loadCourts(silent = false) {
     });
     const data = await api(`/api/courts?${params.toString()}`);
     if (request !== courtsRequest) return;
-    allCourts = Array.isArray(data.courts) ? data.courts : [];
-    $("courtHint").textContent = allCourts.length
-      ? `${slotDate} ${slot}：共 ${allCourts.length} 个场地，可按顺序选择偏好；暂无空位的场地也可先选`
-      : "该时间段暂无场地数据";
+    allCourts = mergeCourts(data.courts);
+    if (data.open === false) {
+      $("courtHint").textContent = `${data.date} 尚未开放，以下为固定场地清单，可按顺序先选好`;
+    } else {
+      $("courtHint").textContent = allCourts.length
+        ? `${slotDate} ${slot}：共 ${allCourts.length} 个场地，可按顺序选择偏好；暂无空位的场地也可先选`
+        : "该时间段暂无场地数据";
+    }
   } catch (err) {
     if (request !== courtsRequest) return;
-    allCourts = [];
+    allCourts = fixedCourts();
     if (!silent) {
       $("courtHint").textContent =
-        err.status === 409 ? `${slotDate} 暂未开放预约，可先选好场地等待开放` : `场地列表读取失败：${err.message}`;
+        err.status === 409
+          ? `${slotDate} 暂未开放预约，以下为固定场地清单，可按顺序先选好`
+          : `场地列表读取失败：${err.message}`;
     }
   }
   renderSelectedCourts();

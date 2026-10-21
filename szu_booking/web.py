@@ -228,9 +228,24 @@ def _target_for(campus: str, sport: str):
     return client, target
 
 
+def _open_dates(client: SzuClient) -> list[str]:
+    try:
+        return client.dates()
+    except AuthRequired:
+        raise
+    except Exception:
+        return []
+
+
 @app.get("/api/slots")
 def slots(campus: str, sport: str, date_mode: str = "tomorrow", target_date: str = "") -> dict[str, Any]:
-    """Live time-slot status for the picker."""
+    """Time-slot grid for the picker.
+
+    The target day is usually still closed before 12:30, but the picker must
+    stay usable so the preferences can be prepared in advance.  When the day
+    is closed we mirror the slot structure of the newest open day and report
+    ``open: false`` instead of failing the request.
+    """
     try:
         if date_mode == "custom":
             if not target_date:
@@ -239,29 +254,48 @@ def slots(campus: str, sport: str, date_mode: str = "tomorrow", target_date: str
         else:
             date = resolve_target_date(Config(date_mode=date_mode), datetime.now())
         client, target = _target_for(campus, sport)
-        dates = client.dates()
-        times = client.times(str(target.campus["XQDM"]), date, str(target.sport["XMDM"]))
-        result = [
-            {
-                "code": str(item.get("CODE")),
-                "disabled": bool(item.get("disabled")),
-                "text": str(item.get("text") or ""),
-                "state": str(item.get("STATE_EXPLAIN") or ""),
-            }
-            for item in times
-        ]
+        dates = _open_dates(client)
+        is_open = date in dates
+        reference = "" if is_open else (max(dates) if dates else "")
+        times: list[dict[str, Any]] = []
+        message = ""
+        if reference or is_open:
+            try:
+                times = client.times(
+                    str(target.campus["XQDM"]),
+                    date if is_open else reference,
+                    str(target.sport["XMDM"]),
+                )
+            except ApiError as exc:
+                message = str(exc)
+        result = []
+        for item in times:
+            if is_open:
+                result.append(
+                    {
+                        "code": str(item.get("CODE")),
+                        "disabled": bool(item.get("disabled")),
+                        "text": str(item.get("text") or ""),
+                        "state": str(item.get("STATE_EXPLAIN") or ""),
+                    }
+                )
+            else:
+                result.append(
+                    {"code": str(item.get("CODE")), "disabled": False, "text": "未开放", "state": ""}
+                )
         return {
             "date": date,
             "dates": dates,
-            "open": date in dates,
+            "open": is_open,
+            "reference": reference,
             "slots": result,
+            "message": message,
         }
     except HTTPException:
         raise
     except AuthRequired as exc:
         raise HTTPException(status_code=401, detail=str(exc))
     except ApiError as exc:
-        # DateNotOpen is a subclass: "not open yet" is a state, not a failure.
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"读取时间段失败：{exc}")
@@ -269,12 +303,22 @@ def slots(campus: str, sport: str, date_mode: str = "tomorrow", target_date: str
 
 @app.get("/api/courts")
 def courts(campus: str, sport: str, date: str, slot: str) -> dict[str, Any]:
-    """Court names (and current availability) for a chosen date/slot."""
+    """Court names for a chosen date/slot.
+
+    Court names are fixed per venue (A1-A8 .. D1-D8), so when the target day
+    is not open yet the layout is read from the newest open day and every
+    court comes back with ``available: null`` (unknown) instead of a 409.
+    """
     try:
         client, target = _target_for(campus, sport)
+        dates = _open_dates(client)
+        is_open = date in dates
+        reference = date if is_open else (max(dates) if dates else "")
+        if not reference:
+            raise ApiError("暂无可查询日期，无法读取场地")
         rooms = client.rooms(
             campus_code=str(target.campus["XQDM"]),
-            date=date,
+            date=reference,
             sport_code=str(target.sport["XMDM"]),
             slot=slot,
         )
@@ -288,16 +332,25 @@ def courts(campus: str, sport: str, date: str, slot: str) -> dict[str, Any]:
                 {"name": name, "available": 0, "total": 0, "venues": []},
             )
             item["total"] += 1
-            if not room.get("disabled"):
+            if is_open and not room.get("disabled"):
                 item["available"] += 1
             venue = str(room.get("CGBM_DISPLAY") or "")
             if venue and venue not in item["venues"]:
                 item["venues"].append(venue)
-        return {"date": date, "slot": slot, "courts": list(merged.values())}
+        items = list(merged.values())
+        if not is_open:
+            for item in items:
+                item["available"] = None
+        return {
+            "date": date,
+            "slot": slot,
+            "open": is_open,
+            "reference": "" if is_open else reference,
+            "courts": items,
+        }
     except AuthRequired as exc:
         raise HTTPException(status_code=401, detail=str(exc))
     except ApiError as exc:
-        # DateNotOpen is a subclass: "not open yet" is a state, not a failure.
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"读取场地失败：{exc}")
