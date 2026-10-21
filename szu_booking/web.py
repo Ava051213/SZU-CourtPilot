@@ -64,6 +64,26 @@ class State:
         except OSError:
             pass
 
+    def mark(self, text: str = "") -> dict[str, Any]:
+        """Append a separator into the log stream.
+
+        "Clear display" must not destroy the records: the browser still needs
+        them when the user scrolls back up.  Writing a ``kind="mark"`` entry
+        keeps ordering, the incremental cursor and the refresh path working
+        without any extra bookkeeping.
+        """
+        stamp = datetime.now().strftime("%H:%M:%S")
+        with self.lock:
+            self.seq += 1
+            entry = {
+                "seq": self.seq,
+                "time": stamp,
+                "text": str(text),
+                "kind": "mark",
+            }
+            self.logs.append(entry)
+        return entry
+
     def refresh_session(self) -> None:
         result = session_status()
         result["checked"] = True
@@ -393,15 +413,14 @@ def logs(after: int = 0) -> dict[str, Any]:
 
 @app.post("/api/logs/clear")
 def clear_logs() -> dict[str, Any]:
-    """Drop the in-memory log buffer.
+    """Draw a separator instead of dropping the buffer.
 
-    Clearing only the browser view is not enough: a refresh resets the cursor
-    to 0 and the whole buffer comes back.  ``data/app.log`` keeps the history.
+    The previous version wiped ``state.logs``, so scrolling back up after a
+    clear showed nothing.  Records now stay in memory for the current process
+    (``data/app.log`` already keeps the on-disk history) and the browser just
+    anchors the viewport on the newest separator.
     """
-    with state.lock:
-        state.logs.clear()
-        seq = state.seq
-    return {"ok": True, "seq": seq}
+    return {"ok": True, "mark": state.mark()}
 
 
 @app.get("/api/screenshot")

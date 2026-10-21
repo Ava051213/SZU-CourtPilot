@@ -681,12 +681,58 @@ async function pollStatus() {
   } catch (_) { /* transient */ }
 }
 
+/* "Clear" appends a separator and parks the viewport on it; the old lines
+   stay where they are, above the viewport.  Scrolling stays native — the
+   wheel moves exactly as far as it would on any long page.  A spacer at the
+   tail supplies the missing scroll range when there are too few lines to
+   overflow the panel on their own. */
+function pushLogNode(node) {
+  const box = $("log");
+  const spacer = box.querySelector(".log-spacer");
+  if (spacer) box.insertBefore(node, spacer);
+  else box.appendChild(node);
+}
+
+function appendMark(item) {
+  const line = document.createElement("div");
+  line.className = "log-mark";
+  line.dataset.seq = item.seq;
+  line.textContent = `—— 已清空 ${item.time} ——`;
+  pushLogNode(line);
+}
+
+function dropLogSpace() {
+  const el = $("log").querySelector(".log-spacer");
+  if (el) el.remove();
+}
+
+/* Put the newest separator against the top of the viewport, growing the tail
+   spacer by exactly the range that is missing. */
+function parkOnLastMark() {
+  const box = $("log");
+  const marks = box.querySelectorAll(".log-mark");
+  const mark = marks[marks.length - 1];
+  if (!mark) return;
+  let spacer = box.querySelector(".log-spacer");
+  if (!spacer) {
+    spacer = document.createElement("div");
+    spacer.className = "log-spacer";
+    box.appendChild(spacer);
+  }
+  spacer.style.height = "0px";
+  const top = mark.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+  const room = box.scrollHeight - box.clientHeight;
+  if (top > room) spacer.style.height = `${top - room}px`;
+  box.scrollTop = top;
+}
+
 function appendLogs(items) {
   if (!items || !items.length) return;
   const box = $("log");
   if (box.textContent === "等待操作……") box.textContent = "";
   const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   for (const item of items) {
+    if (item.kind === "mark") { appendMark(item); continue; }
     const line = document.createElement("div");
     const cls = /失败|错误|异常|超时|无效/.test(item.text) ? "err"
       : /成功|已保存|登录有效|时间到|已提交/.test(item.text) ? "ok"
@@ -697,7 +743,10 @@ function appendLogs(items) {
     time.textContent = `[${item.time}] `;
     line.appendChild(time);
     line.appendChild(document.createTextNode(item.text));
-    box.appendChild(line);
+    pushLogNode(line);
+  }
+  if (stick && box.children.length > 3200) {
+    while (box.children.length > 3000) box.removeChild(box.firstChild);
   }
   if (stick) box.scrollTop = box.scrollHeight;
 }
@@ -715,10 +764,16 @@ async function pollLogs() {
 
 async function clearLogs() {
   try {
+    await pollLogs();  // flush whatever the poll gap still owes us
     const data = await api("/api/logs/clear", { method: "POST" });
-    $("log").textContent = "";
-    lastLogSeq = data.seq || serverSeq;
-    serverSeq = lastLogSeq;
+    const mark = data.mark || {
+      seq: data.seq || lastLogSeq,
+      time: new Date().toTimeString().slice(0, 8),
+      kind: "mark",
+    };
+    lastLogSeq = mark.seq;
+    appendMark(mark);
+    parkOnLastMark();
   } catch (err) {
     setMessage(`清空日志失败：${err.message}`, "error");
   }
@@ -765,6 +820,9 @@ function bind() {
   $("scheduleBtn").addEventListener("click", () => start("schedule"));
   $("stopBtn").addEventListener("click", stop);
   $("clearLog").addEventListener("click", clearLogs);
+  $("log").addEventListener("scroll", () => {
+    if ($("log").scrollTop <= 0) dropLogSpace();
+  }, { passive: true });
 }
 
 async function init() {
@@ -777,6 +835,7 @@ async function init() {
   }
   await pollStatus();
   await pollLogs();
+  if (document.querySelectorAll(".log-mark").length) parkOnLastMark();
   setInterval(pollStatus, 1000);
   setInterval(pollLogs, 1000);
 }

@@ -140,7 +140,7 @@ main { max-width: 1240px; margin: 26px auto 40px; padding: 0 22px; }
 }
 
 .config { padding: 22px 24px 20px; }
-.logs { padding: 22px 20px 14px; display: flex; flex-direction: column; min-height: 620px; }
+.logs { padding: 22px 20px 14px; display: flex; flex-direction: column; height: 620px; }
 
 .row { display: grid; gap: 12px; }
 .row.two { grid-template-columns: 1fr 1fr; }
@@ -319,6 +319,7 @@ input:focus, select:focus {
 
 .log {
   flex: 1;
+  height: 0;
   margin: 0;
   min-height: 0;
   overflow: auto;
@@ -332,11 +333,33 @@ input:focus, select:focus {
   white-space: pre-wrap;
   word-break: break-word;
   border: 1px solid #0a0f17;
+  overflow-anchor: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
+.log::-webkit-scrollbar { width: 9px; height: 9px; }
+.log::-webkit-scrollbar-track { background: transparent; }
+.log::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.log::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); background-clip: padding-box; }
 .log .t { color: #6d7c90; }
 .log .err { color: #ff9aa2; }
 .log .ok { color: #8ee6b0; }
 .log .warn { color: #ffd479; }
+
+.log .log-mark {
+  margin: 10px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  color: #55606f;
+  font-size: 11.5px;
+  text-align: center;
+  user-select: none;
+}
 
 .log-foot {
   display: flex;
@@ -366,7 +389,7 @@ input:focus, select:focus {
 
 @media (max-width: 960px) {
   .layout { grid-template-columns: 1fr; }
-  .logs { min-height: 420px; }
+  .logs { height: 420px; }
   .topbar { padding: 16px 20px; align-items: flex-start; flex-direction: column; }
   .chips { justify-content: flex-start; }
   .session { flex-direction: column; align-items: flex-start; }
