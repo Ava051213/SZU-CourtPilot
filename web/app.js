@@ -701,36 +701,37 @@ function appendMark(item) {
   pushLogNode(line);
 }
 
-function dropLogSpace() {
-  const el = $("log").querySelector(".log-spacer");
-  if (el) el.remove();
-}
-
-/* Put the newest separator against the top of the viewport, growing the tail
-   spacer by exactly the range that is missing. */
-function parkOnLastMark() {
+/* A cleared panel keeps the lines above the separator and pads the tail with
+   one screen of blank, so the scroll range never runs out.  No measuring — a
+   tall window can't break it. */
+function fitLogSpace() {
   const box = $("log");
-  const marks = box.querySelectorAll(".log-mark");
-  const mark = marks[marks.length - 1];
-  if (!mark) return;
+  if (!box.querySelector(".log-mark")) return false;
   let spacer = box.querySelector(".log-spacer");
   if (!spacer) {
     spacer = document.createElement("div");
     spacer.className = "log-spacer";
     box.appendChild(spacer);
   }
-  spacer.style.height = "0px";
-  const top = mark.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
-  const room = box.scrollHeight - box.clientHeight;
-  if (top > room) spacer.style.height = `${top - room}px`;
-  box.scrollTop = top;
+  spacer.style.height = `${box.clientHeight}px`;
+  return true;
+}
+
+/* Put the newest separator against the top of the viewport. */
+function parkOnLastMark() {
+  const box = $("log");
+  if (!fitLogSpace()) return;
+  const marks = box.querySelectorAll(".log-mark");
+  const mark = marks[marks.length - 1];
+  box.scrollTop = mark.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
 }
 
 function appendLogs(items) {
   if (!items || !items.length) return;
   const box = $("log");
   if (box.textContent === "等待操作……") box.textContent = "";
-  const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  const paced = Boolean(box.querySelector(".log-spacer"));
+  const stick = !paced && box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   for (const item of items) {
     if (item.kind === "mark") { appendMark(item); continue; }
     const line = document.createElement("div");
@@ -748,6 +749,7 @@ function appendLogs(items) {
   if (stick && box.children.length > 3200) {
     while (box.children.length > 3000) box.removeChild(box.firstChild);
   }
+  if (paced) fitLogSpace();
   if (stick) box.scrollTop = box.scrollHeight;
 }
 
@@ -820,9 +822,6 @@ function bind() {
   $("scheduleBtn").addEventListener("click", () => start("schedule"));
   $("stopBtn").addEventListener("click", stop);
   $("clearLog").addEventListener("click", clearLogs);
-  $("log").addEventListener("scroll", () => {
-    if ($("log").scrollTop <= 0) dropLogSpace();
-  }, { passive: true });
 }
 
 async function init() {
