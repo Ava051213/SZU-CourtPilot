@@ -121,7 +121,12 @@ main { max-width: 1240px; margin: 26px auto 40px; padding: 0 22px; }
   color: var(--green);
   font-size: 13px;
 }
-.result-banner strong { margin-right: 8px; }
+.result-banner strong { display: block; }
+.result-main { min-width: 0; }
+/* One row per submitted booking; a multi-court run creates several orders. */
+.result-lines { display: grid; gap: 3px; margin-top: 4px; }
+.result-line { font-size: 12.5px; line-height: 1.5; }
+.result-line.muted { opacity: 0.72; }
 .result-banner .btn { flex-shrink: 0; height: 36px; font-size: 12px; }
 .result-banner.partial {
   background: var(--amber-soft);
@@ -286,6 +291,9 @@ input:focus, select:focus {
 
 .btn {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid transparent;
   border-radius: 10px;
   height: 40px;
@@ -293,6 +301,10 @@ input:focus, select:focus {
   font: inherit;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
   cursor: pointer;
   transition: transform 0.08s, box-shadow 0.15s, background 0.15s;
 }

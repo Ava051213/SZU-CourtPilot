@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SZU-CourtPilot</title>
-  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body>
   <header class="topbar">
@@ -36,9 +36,9 @@
     </section>
 
     <section id="resultBanner" class="result-banner" hidden>
-      <div>
-        <strong>预约已提交</strong>
-        <span id="resultText"></span>
+      <div class="result-main">
+        <strong id="resultTitle">预约已提交</strong>
+        <div id="resultText" class="result-lines"></div>
       </div>
       <a class="btn primary" href="https://ehall.szu.edu.cn/qljfwapp/sys/lwSzuCgyy/index.do#/myBooking" target="_blank" rel="noreferrer">去“我的预约”支付</a>
     </section>
@@ -180,6 +180,6 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=19"></script>
+  <script src="/static/app.js?v=20"></script>
 </body>
 </html>

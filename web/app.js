@@ -663,15 +663,42 @@ function renderStatus(data) {
   const booked = result && (result.success || result.partial) && !result.dry_run;
   banner.hidden = !booked;
   banner.classList.toggle("partial", Boolean(booked && result.partial));
-  if (booked) {
-    banner.querySelector("strong").textContent = result.success ? "预约已提交" : "部分成功";
-    $("resultText").textContent = result.message || "请在 45 分钟内完成支付。";
-  }
+  if (booked) renderResult(result);
 
   if (data.login && data.login.running) {
     $("sessionChip").className = "chip busy";
     $("sessionChip").innerHTML = "<i></i>等待登录";
     $("sessionText").textContent = data.login.message || "请在 Chrome 窗口中登录……";
+  }
+}
+
+/* One row per booking.  A run can submit several orders (one per slot), and
+   result.message only ever holds the last line the runner logged — so the
+   banner is rebuilt from result.bookings instead. */
+function renderResult(result) {
+  const list = Array.isArray(result.bookings) ? result.bookings : [];
+  $("resultTitle").textContent = result.success
+    ? (list.length > 1 ? `预约已提交（${list.length} 单）` : "预约已提交")
+    : `部分成功（${list.length}/${result.needed || "?"} 单）`;
+
+  const box = $("resultText");
+  box.textContent = "";
+  if (!list.length) {
+    box.textContent = result.message || "请在 45 分钟内完成支付。";
+    return;
+  }
+  list.forEach((item) => {
+    const when = [item.slot, item.court].filter(Boolean).join(" / ");
+    const row = document.createElement("div");
+    row.className = "result-line";
+    row.textContent = `${[result.date, when].filter(Boolean).join(" ")}，请在45分钟内支付`;
+    box.appendChild(row);
+  });
+  if (Array.isArray(result.missed) && result.missed.length) {
+    const row = document.createElement("div");
+    row.className = "result-line muted";
+    row.textContent = `未约到：${result.missed.join("、")}`;
+    box.appendChild(row);
   }
 }
 
